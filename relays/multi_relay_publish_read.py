@@ -15,6 +15,7 @@ RELAYS = [
     "wss://relay.damus.io",
     "wss://relay.snort.social",
     "wss://nos.lol",
+    # "ws://localhost:8008",
 ]
 
 # Track events we’ve already printed (dedupe across relays)
