@@ -1,7 +1,9 @@
 secp256k1
 websocket-client
-python-dotenv>=1.0.0
-bech32>=1.2.0
+python-dotenv
+bech32
 websockets
 fastapi
 uvicorn
+Jinja2
+cryptography
