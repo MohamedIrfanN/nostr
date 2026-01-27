@@ -222,3 +222,35 @@ def build_signed_dm(privkey: PrivateKey, recipient_pubkey_input: str, plaintext:
     return event_id, event
 
 
+def build_signed_delete(
+    privkey: PrivateKey,
+    target_event_id: str,
+) -> tuple[str, dict]:
+    """
+    NIP-09 deletion request (kind:5)
+    tags: [["e", <target_event_id>]]
+    content: optional reason
+    """
+    pubkey = pubkey_xonly_hex(privkey)
+    created_at = int(time.time())
+    kind = 5
+
+    eid = require_32byte_hex(target_event_id, "target event id")
+
+    tags: list[list[str]] = [["e", eid]]
+    content = ""
+
+    event_id = _event_id_from_fields(pubkey, created_at, kind, tags, content)
+    sig = _sign_event(privkey, event_id)
+
+    event = {
+        "id": event_id,
+        "pubkey": pubkey,
+        "created_at": created_at,
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+        "sig": sig,
+    }
+    return event_id, event
+

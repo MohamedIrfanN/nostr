@@ -6,6 +6,7 @@ from .utils import require_32byte_hex
 from .events import build_signed_text_note, build_signed_contacts_event
 from .publish import publish_to_relays
 from .utils import normalize_pubkey_input
+from .dm_subscribe import fetch_dm_inbox_7d, open_dm_chat, _fmt_time
 import time
 import websockets
 from .contacts import (
@@ -193,19 +194,28 @@ async def do_comment(privkey):
 
 async def do_dm(privkey):
     print_header("DM (NIP-04)")
-    recipient = input("Enter recipient pubkey (64-hex or npub1...): ").strip()
+
+    recipient_in = input("Enter recipient pubkey (64-hex or npub1...): ").strip()
+
+    try:
+        recipient_hex = normalize_pubkey_input(recipient_in)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
     msg = input("Enter message: ").strip()
+    if not msg:
+        print("⚠️ message cannot be empty")
+        return
 
     from .events import build_signed_dm
-    eid, ev = build_signed_dm(privkey, recipient, msg)
+    eid, ev = build_signed_dm(privkey, recipient_hex, msg)
     await publish_to_relays(eid, ev)
+
 
 
 async def do_dm_inbox(privkey, my_pubkey: str):
     print_header("DM INBOX")
-
-    from .dm_subscribe import fetch_dm_inbox_7d, open_dm_chat
-    from .dm_subscribe import _fmt_time  # reuse formatter
 
     inbox = await fetch_dm_inbox_7d(privkey, my_pubkey)
     if not inbox:
@@ -224,11 +234,15 @@ async def do_dm_inbox(privkey, my_pubkey: str):
         print(f"{i}) {name}  {_fmt_time(info['last_ts'])}  {info['preview']}")
 
     sel = input("\nSelect chat (number, blank to cancel): ").strip()
+    if not sel:
+        return
     if not sel.isdigit():
+        print("⚠️ enter a number")
         return
 
     idx = int(sel) - 1
     if idx < 0 or idx >= len(partners):
+        print("⚠️ invalid selection")
         return
 
     partner_pubkey = partners[idx][0]
@@ -237,6 +251,7 @@ async def do_dm_inbox(privkey, my_pubkey: str):
         await open_dm_chat(privkey, my_pubkey, partner_pubkey)
     except KeyboardInterrupt:
         print("\n↩️ back to inbox")
+
 
 async def do_dm_menu(privkey, my_pubkey: str):
     print_header("DM MENU")
@@ -253,6 +268,77 @@ async def do_dm_menu(privkey, my_pubkey: str):
         return
     else:
         print("⚠️ invalid option")
+
+
+async def do_delete(privkey):
+    print_header("DELETE (NIP-09)")
+    target_id_in = input("Enter event id to delete (64-hex): ").strip()
+
+    try:
+        target_id = require_32byte_hex(target_id_in, "event id")
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
+    from .events import build_signed_delete
+    eid, ev = build_signed_delete(privkey, target_id)
+
+    await publish_to_relays(eid, ev)
+    print("🗑️ deletion request published (relays/clients may or may not remove the target)")
+
+
+
+async def do_search_user():
+    print_header("SEARCH USER")
+    print("1) Search by pubkey (hex or npub1...)")
+    print("2) Search by name (name/display_name/nip05)")
+    print("0) Back")
+
+    choice = input("\nSelect: ").strip()
+    if choice == "0":
+        return
+
+    from .profile_search import fetch_profile_by_pubkey, search_profiles_by_name
+
+    if choice == "1":
+        pk = input("Enter pubkey (64-hex or npub1...): ").strip()
+        try:
+            prof = await fetch_profile_by_pubkey(pk)
+        except ValueError as e:
+            print(f"⚠️ {e}")
+            return
+
+        if not prof:
+            print("No profile (kind:0) found on our relays.")
+            return
+
+        print("\nProfile:")
+        print(" pubkey:", prof["_pubkey"][:12] + "…")
+        print(" name:", prof.get("name") or "")
+        print(" display_name:", prof.get("display_name") or "")
+        print(" nip05:", prof.get("nip05") or "")
+        print(" lud16:", prof.get("lud16") or "")
+        print(" about:", (prof.get("about") or "")[:200])
+
+    elif choice == "2":
+        q = input("Enter name to search: ").strip()
+        results = await search_profiles_by_name(q, since_days=365, per_relay_limit=800)
+
+        if not results:
+            print("No matches found (name search is relay-dependent).")
+            return
+
+        print(f"\nMatches ({len(results)}):")
+        for i, prof in enumerate(results[:20], 1):
+            name = prof.get("display_name") or prof.get("name") or ""
+            nip05 = prof.get("nip05") or ""
+            pk = prof.get("_pubkey", "")
+            print(f"{i}) {name}  {nip05}  {pk[:12]}…")
+
+    else:
+        print("⚠️ invalid option")
+
+
 
 
 async def main():
@@ -272,6 +358,8 @@ async def main():
         print("6) Reaction (like)")
         print("7) Comment (reply by event id)")
         print("8) DM")
+        print("9) Delete (by event id)")
+        print("10) Search User")
         print("0) Exit")
 
         choice = input("\nSelect: ").strip()
@@ -291,7 +379,11 @@ async def main():
         elif choice == "7":
             await do_comment(privkey)
         elif choice == "8":
-            await do_dm_menu(privkey, my_pubkey)   
+            await do_dm_menu(privkey, my_pubkey)
+        elif choice == "9":
+            await do_delete(privkey)   
+        elif choice == "10":
+            await do_search_user()
         elif choice == "0":
             print("\n👋 Bye")
             return
