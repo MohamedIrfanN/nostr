@@ -4,6 +4,8 @@ from .config import RELAYS
 from .utils import get_privkey_from_env, pubkey_xonly_hex
 from .events import build_signed_text_note, build_signed_contacts_event
 from .publish import publish_to_relays
+import time
+import websockets
 from .contacts import (
     fetch_following_all_relays,
     apply_follow,
@@ -19,9 +21,31 @@ def print_header(title: str):
 
 async def show_status(my_pubkey: str):
     print_header("STATUS")
+
+    async def check_relay(relay: str, timeout_sec: float = 3.0):
+        t0 = time.perf_counter()
+        try:
+            ws = await asyncio.wait_for(
+                websockets.connect(relay, ping_interval=20, ping_timeout=20),
+                timeout=timeout_sec,
+            )
+            dt_ms = (time.perf_counter() - t0) * 1000
+            await ws.close()
+            return relay, True, dt_ms, None
+        except Exception as e:
+            dt_ms = (time.perf_counter() - t0) * 1000
+            return relay, False, dt_ms, f"{type(e).__name__}: {e}"
+
     print("Relays:")
-    for r in RELAYS:
-        print(" -", r)
+    results = await asyncio.gather(*(check_relay(r) for r in RELAYS))
+
+    for relay, ok, dt_ms, err in results:
+        if ok:
+            print(f" - {relay:<28} ✅ connected ({dt_ms:.0f} ms)")
+        else:
+            # keep error short
+            short_err = (err or "").splitlines()[0]
+            print(f" - {relay:<28} ❌ failed ({dt_ms:.0f} ms)  {short_err}")
 
     follows = await fetch_following_all_relays(my_pubkey)
     print(f"\nFollowing count: {len(follows)}")
@@ -143,7 +167,58 @@ async def do_dm(privkey):
     await publish_to_relays(eid, ev)
 
 
+async def do_dm_inbox(privkey, my_pubkey: str):
+    print_header("DM INBOX")
 
+    from .dm_subscribe import fetch_dm_inbox_7d, open_dm_chat
+    from .dm_subscribe import _fmt_time  # reuse formatter
+
+    inbox = await fetch_dm_inbox_7d(privkey, my_pubkey)
+    if not inbox:
+        print("No DMs in last 7 days.")
+        return
+
+    partners = sorted(
+        inbox.items(),
+        key=lambda x: x[1]["last_ts"],
+        reverse=True,
+    )
+
+    print("\nDM Inbox (last 7 days):")
+    for i, (pk, info) in enumerate(partners, 1):
+        name = info.get("name", pk[:12] + "…")
+        print(f"{i}) {name}  {_fmt_time(info['last_ts'])}  {info['preview']}")
+
+    sel = input("\nSelect chat (number, blank to cancel): ").strip()
+    if not sel.isdigit():
+        return
+
+    idx = int(sel) - 1
+    if idx < 0 or idx >= len(partners):
+        return
+
+    partner_pubkey = partners[idx][0]
+
+    try:
+        await open_dm_chat(privkey, my_pubkey, partner_pubkey)
+    except KeyboardInterrupt:
+        print("\n↩️ back to inbox")
+
+async def do_dm_menu(privkey, my_pubkey: str):
+    print_header("DM MENU")
+    print("1) New DM")
+    print("2) DM Inbox and Chat")
+    print("0) Back")
+
+    choice = input("\nSelect: ").strip()
+    if choice == "1":
+        await do_dm(privkey)
+    elif choice == "2":
+        await do_dm_inbox(privkey, my_pubkey)
+    elif choice == "0":
+        return
+    else:
+        print("⚠️ invalid option")
 
 
 async def main():
@@ -162,7 +237,7 @@ async def main():
         print("5) Status")
         print("6) Reaction (like)")
         print("7) Comment (reply by event id)")
-        print("8) DM (send)")
+        print("8) DM")
         print("0) Exit")
 
         choice = input("\nSelect: ").strip()
@@ -182,7 +257,7 @@ async def main():
         elif choice == "7":
             await do_comment(privkey)
         elif choice == "8":
-            await do_dm(privkey)
+            await do_dm_menu(privkey, my_pubkey)   
         elif choice == "0":
             print("\n👋 Bye")
             return
