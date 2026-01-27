@@ -77,7 +77,7 @@ async def search_profiles_by_name(
 
     async def _try_nip50(relay: str):
         sub_id = str(uuid.uuid4())
-        req = ["REQ", sub_id, {"kinds": [0], "search": q, "since": since, "limit": 1}]
+        req = ["REQ", sub_id, {"kinds": [0], "search": q, "since": since, "limit": 20}]
         try:
             async with websockets.connect(relay, ping_interval=20, ping_timeout=20) as ws:
                 await ws.send(json.dumps(req, separators=(",", ":")))
