@@ -2,8 +2,10 @@ import asyncio
 from .lookup import fetch_event_by_id_all_relays
 from .config import RELAYS
 from .utils import get_privkey_from_env, pubkey_xonly_hex
+from .utils import require_32byte_hex
 from .events import build_signed_text_note, build_signed_contacts_event
 from .publish import publish_to_relays
+from .utils import normalize_pubkey_input
 import time
 import websockets
 from .contacts import (
@@ -83,20 +85,32 @@ async def do_events(my_pubkey: str):
 
 async def do_follow(privkey, my_pubkey: str):
     print_header("FOLLOW")
-    pk = input("Enter pubkey (64-hex): ").strip().lower()
+    pk_input = input("Enter pubkey (64-hex or npub1...): ").strip()
+
+    try:
+        pk = normalize_pubkey_input(pk_input)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
 
     current = await fetch_following_all_relays(my_pubkey)
     updated = apply_follow(current, pk)
 
-    # publish updated contacts (kind:3)
     eid, ev = build_signed_contacts_event(privkey, sorted(updated))
     await publish_to_relays(eid, ev)
     print(f"✅ Now following: {len(updated)}")
 
 
+
 async def do_unfollow(privkey, my_pubkey: str):
     print_header("UNFOLLOW")
-    pk = input("Enter pubkey (64-hex): ").strip().lower()
+    pk_input = input("Enter pubkey (64-hex or npub1...): ").strip()
+
+    try:
+        pk = normalize_pubkey_input(pk_input)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
 
     current = await fetch_following_all_relays(my_pubkey)
     updated = apply_unfollow(current, pk)
@@ -106,11 +120,19 @@ async def do_unfollow(privkey, my_pubkey: str):
     print(f"✅ Now following: {len(updated)}")
 
 
+
 async def do_reaction(privkey):
     print_header("REACTION (LIKE)")
-    target_id = input("Enter event id (64-hex): ").strip().lower()
+    target_id_in = input("Enter event id (64-hex): ").strip()
 
-    # Try to lookup the target event to get author pubkey for ["p", ...]
+    # 1) Validate
+    try:
+        target_id = require_32byte_hex(target_id_in, "event id")
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
+    # 2) Optional lookup to add ["p", author] tag
     target_pubkey = None
     try:
         ev = await fetch_event_by_id_all_relays(target_id)
@@ -125,13 +147,13 @@ async def do_reaction(privkey):
     except Exception as e:
         print(f"Lookup failed (will react with only e-tag): {e}")
 
-    # Build + publish reaction
+    # 3) Build + publish reaction
     from .events import build_signed_reaction
     eid, reaction_event = build_signed_reaction(
         privkey,
         target_event_id=target_id,
         target_pubkey=target_pubkey,
-        reaction="+",  # like
+        reaction="+",
     )
     await publish_to_relays(eid, reaction_event)
 
@@ -139,10 +161,21 @@ async def do_reaction(privkey):
 
 async def do_comment(privkey):
     print_header("COMMENT")
-    target_id = input("Enter event id (64-hex): ").strip().lower()
+    target_id_in = input("Enter event id (64-hex): ").strip()
+    # Validate event id
+    try:
+        target_id = require_32byte_hex(target_id_in, "event id")
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
     comment_text = input("Enter comment text: ").strip()
 
-    # Lookup the target event first (so we can tag root/reply/p correctly)
+    if not comment_text:
+        print("⚠️ comment cannot be empty")
+        return
+
+    # Lookup the target event (to build correct NIP-10 reply tags)
     from .lookup import fetch_event_by_id_all_relays
     target = await fetch_event_by_id_all_relays(target_id)
 
@@ -154,6 +187,7 @@ async def do_comment(privkey):
     from .events import build_signed_comment
     eid, ev = build_signed_comment(privkey, target, comment_text)
     await publish_to_relays(eid, ev)
+
 
 
 

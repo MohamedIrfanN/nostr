@@ -26,6 +26,28 @@ def get_privkey_from_env() -> PrivateKey:
 
     return PrivateKey(sk_bytes, raw=True)
 
+def is_32byte_hex(s: str | None) -> bool:
+    if not s:
+        return False
+    s = s.strip().lower()
+    if len(s) != 64:
+        return False
+    try:
+        bytes.fromhex(s)
+        return True
+    except ValueError:
+        return False
+
+
+def require_32byte_hex(s: str | None, label: str) -> str:
+    """
+    Validate and return normalized lowercase 64-hex (32 bytes).
+    """
+    if not is_32byte_hex(s):
+        raise ValueError(f"{label} must be 64-hex (32 bytes)")
+    return s.strip().lower()
+
+
 
 def pubkey_xonly_hex(privkey: PrivateKey) -> str:
     return privkey.pubkey.serialize(compressed=True)[1:33].hex()
@@ -40,8 +62,8 @@ def normalize_pubkey_input(s: str) -> str:
     s = (s or "").strip()
 
     # If user pasted hex already
-    if len(s) == 64 and all(c in "0123456789abcdefABCDEF" for c in s):
-        return s.lower()
+    if is_32byte_hex(s):
+        return s.strip().lower()
 
     # If user pasted npub
     if s.startswith("npub1"):

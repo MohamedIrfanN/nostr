@@ -5,6 +5,7 @@ from secp256k1 import PrivateKey
 from .utils import pubkey_xonly_hex
 from .nip04 import nip04_encrypt
 from .utils import normalize_pubkey_input
+from .utils import require_32byte_hex, is_32byte_hex
 
 
 # NIP-01 event id from fields
@@ -60,7 +61,7 @@ def build_signed_contacts_event(
     seen = set()
     for pk in followed_pubkeys:
         pk = (pk or "").strip().lower()
-        if len(pk) == 64 and all(c in "0123456789abcdef" for c in pk) and pk not in seen:
+        if is_32byte_hex(pk) and pk not in seen:
             seen.add(pk)
             clean.append(pk)
     clean.sort()
@@ -98,15 +99,13 @@ def build_signed_reaction(
     created_at = int(time.time())
     kind = 7
 
-    eid = (target_event_id or "").strip().lower()
-    if len(eid) != 64 or not all(c in "0123456789abcdef" for c in eid):
-        raise ValueError("event id must be 64-hex")
+    eid = require_32byte_hex(target_event_id, "event id")
 
     tags: list[list[str]] = [["e", eid]]
 
     if target_pubkey:
         pk = (target_pubkey or "").strip().lower()
-        if len(pk) == 64 and all(c in "0123456789abcdef" for c in pk):
+        if is_32byte_hex(pk):
             tags.append(["p", pk])
 
     content = (reaction or "+").strip() or "+"
@@ -144,11 +143,8 @@ def build_signed_comment(
     created_at = int(time.time())
     kind = 1
 
-    reply_to_id = (target_event.get("id") or "").strip().lower()
+    reply_to_id = require_32byte_hex(target_event.get("id"), "Target event id")
     reply_to_author = (target_event.get("pubkey") or "").strip().lower()
-
-    if len(reply_to_id) != 64 or not all(c in "0123456789abcdef" for c in reply_to_id):
-        raise ValueError("Target event has invalid id")
 
     # Find root id from target's tags if present; otherwise root is the target itself
     root_id = None
@@ -156,7 +152,7 @@ def build_signed_comment(
         # NIP-10 marker: ["e", <id>, <relay?>, "root"]
         if isinstance(t, list) and len(t) >= 4 and t[0] == "e" and t[3] == "root":
             cand = (t[1] or "").strip().lower()
-            if len(cand) == 64 and all(c in "0123456789abcdef" for c in cand):
+            if is_32byte_hex(cand):
                 root_id = cand
                 break
 
@@ -168,7 +164,7 @@ def build_signed_comment(
         ["e", reply_to_id, "", "reply"],
     ]
 
-    if len(reply_to_author) == 64 and all(c in "0123456789abcdef" for c in reply_to_author):
+    if is_32byte_hex(reply_to_author):
         tags.append(["p", reply_to_author])
 
     content = (content or "").strip()

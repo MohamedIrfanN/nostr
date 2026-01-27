@@ -71,9 +71,8 @@ def nip04_shared_key(privkey, recipient_pubkey_hex: str) -> bytes:
     NIP-04: use ONLY the X coordinate of the ECDH shared point (32 bytes) as the AES key.
     Do NOT hash it.
     """
-    recipient_pubkey_hex = recipient_pubkey_hex.strip().lower()
-    if len(recipient_pubkey_hex) != 64 or not all(c in "0123456789abcdef" for c in recipient_pubkey_hex):
-        raise ValueError("recipient pubkey must be 64-hex")
+    from .utils import require_32byte_hex
+    recipient_pubkey_hex = require_32byte_hex(recipient_pubkey_hex, "recipient pubkey")
 
     sk = _privkey_bytes(privkey)
     sk_int = int.from_bytes(sk, "big")
