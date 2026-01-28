@@ -63,21 +63,19 @@ async def fetch_profile_by_pubkey(pubkey_input: str, timeout_sec: float = 3.0) -
 
 async def search_profiles_by_name(
     name_query: str,
-    since_days: int = 30,
     per_relay_limit: int = 150,   # was 400 (too slow for fallback)
 ) -> list[dict]:
     q = (name_query or "").strip().lower()
     if not q:
         return []
 
-    since = int(time.time()) - since_days * 24 * 60 * 60
     found: dict[str, dict] = {}
 
-    RECV_TIMEOUT = 3.0  # seconds per recv; prevents "stuck"
+    RECV_TIMEOUT = 10
 
     async def _try_nip50(relay: str):
         sub_id = str(uuid.uuid4())
-        req = ["REQ", sub_id, {"kinds": [0], "search": q, "since": since, "limit": 20}]
+        req = ["REQ", sub_id, {"kinds": [0], "search": q, "limit": 10}]
         try:
             async with websockets.connect(relay, ping_interval=20, ping_timeout=20) as ws:
                 await ws.send(json.dumps(req, separators=(",", ":")))
@@ -110,7 +108,7 @@ async def search_profiles_by_name(
 
     async def _fallback_scan(relay: str):
         sub_id = str(uuid.uuid4())
-        req = ["REQ", sub_id, {"kinds": [0], "since": since, "limit": per_relay_limit}]
+        req = ["REQ", sub_id, {"kinds": [0], "limit": 10}]
         try:
             async with websockets.connect(relay, ping_interval=20, ping_timeout=20) as ws:
                 await ws.send(json.dumps(req, separators=(",", ":")))

@@ -254,3 +254,56 @@ def build_signed_delete(
     }
     return event_id, event
 
+
+
+def build_signed_mute_list(
+    privkey: PrivateKey,
+    muted_pubkeys: list[str],
+    content: str = "",
+) -> tuple[str, dict]:
+    """
+    NIP-51 mute list (parameterized list)
+    kind: 30000
+    tags:
+      ["d", "mute"]
+      ["p", <pubkey>]...
+    """
+    pubkey = pubkey_xonly_hex(privkey)
+    created_at = int(time.time())
+    kind = 30000
+
+    # normalize + dedupe
+    clean: list[str] = []
+    seen = set()
+    for pk in muted_pubkeys:
+        pk = (pk or "").strip().lower()
+        if len(pk) != 64:
+            continue
+        try:
+            bytes.fromhex(pk)
+        except ValueError:
+            continue
+        if pk in seen:
+            continue
+        seen.add(pk)
+        clean.append(pk)
+    clean.sort()
+
+    tags: list[list[str]] = [["d", "mute"]] + [["p", pk] for pk in clean]
+    content = (content or "").strip()
+
+    event_id = _event_id_from_fields(pubkey, created_at, kind, tags, content)
+    sig = _sign_event(privkey, event_id)
+
+    event = {
+        "id": event_id,
+        "pubkey": pubkey,
+        "created_at": created_at,
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+        "sig": sig,
+    }
+    return event_id, event
+
+

@@ -51,7 +51,7 @@ def _decrypt(privkey, partner: str, content: str) -> str:
 
 # ---------- PHASE A : inbox ----------
 
-async def fetch_dm_inbox_7d(privkey, my_pubkey: str) -> dict[str, dict]:
+async def fetch_dm_inbox_7d(privkey, my_pubkey: str, blocked_set: set[str] | None = None) -> dict[str, dict]:
     """
     Returns:
       {
@@ -97,6 +97,8 @@ async def fetch_dm_inbox_7d(privkey, my_pubkey: str) -> dict[str, dict]:
                     seen_ids.add(eid)
 
                     direction, partner = _extract_partner(my_pubkey, event)
+                    if partner in blocked_set:
+                        return
                     ts = event.get("created_at") or 0
                     text = _decrypt(privkey, partner, event.get("content") or "")
 
@@ -128,13 +130,17 @@ async def fetch_dm_inbox_7d(privkey, my_pubkey: str) -> dict[str, dict]:
 
 # ---------- PHASE B : chat ----------
 
-async def open_dm_chat(privkey, my_pubkey: str, partner: str):
+async def open_dm_chat(privkey, my_pubkey: str, partner: str, blocked_set: set[str] | None = None):
     """
     Chat with one partner:
       - Phase 1: load history (sorted)
       - Phase 2: live receive + send messages
     Type /back to return to inbox.
     """
+    blocked_set = blocked_set or set()
+    if partner in blocked_set:
+        print("⚠️ This user is blocked. Unblock to open chat.")
+        return
     history_since = int(time.time()) - 7 * 24 * 60 * 60
     live_since = int(time.time()) - 5
 

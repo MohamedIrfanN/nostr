@@ -9,6 +9,7 @@ from .utils import normalize_pubkey_input
 from .dm_subscribe import fetch_dm_inbox_7d, open_dm_chat, _fmt_time
 import time
 import websockets
+from .mute_list import fetch_published_mute_set
 from .contacts import (
     fetch_following_all_relays,
     apply_follow,
@@ -79,7 +80,7 @@ async def do_events(my_pubkey: str):
     print("Ctrl+C to stop events and return to menu.\n")
 
     try:
-        await read_from_all_relays_following(authors)
+        await read_from_all_relays_following(authors, blocked_set)
     except KeyboardInterrupt:
         print("\n↩️ returning to menu")
 
@@ -192,7 +193,7 @@ async def do_comment(privkey):
 
 
 
-async def do_dm(privkey):
+async def do_dm(privkey, blocked_set: set[str] | None = None):
     print_header("DM (NIP-04)")
 
     recipient_in = input("Enter recipient pubkey (64-hex or npub1...): ").strip()
@@ -214,10 +215,10 @@ async def do_dm(privkey):
 
 
 
-async def do_dm_inbox(privkey, my_pubkey: str):
+async def do_dm_inbox(privkey, my_pubkey: str, blocked_set: set[str] | None = None):
     print_header("DM INBOX")
 
-    inbox = await fetch_dm_inbox_7d(privkey, my_pubkey)
+    inbox = await fetch_dm_inbox_7d(privkey, my_pubkey, blocked_set)
     if not inbox:
         print("No DMs in last 7 days.")
         return
@@ -248,12 +249,12 @@ async def do_dm_inbox(privkey, my_pubkey: str):
     partner_pubkey = partners[idx][0]
 
     try:
-        await open_dm_chat(privkey, my_pubkey, partner_pubkey)
+        await open_dm_chat(privkey, my_pubkey, partner_pubkey, blocked_set)
     except KeyboardInterrupt:
         print("\n↩️ back to inbox")
 
 
-async def do_dm_menu(privkey, my_pubkey: str):
+async def do_dm_menu(privkey, my_pubkey: str, blocked_set: set[str] | None = None):
     print_header("DM MENU")
     print("1) New DM")
     print("2) DM Inbox and Chat")
@@ -261,9 +262,9 @@ async def do_dm_menu(privkey, my_pubkey: str):
 
     choice = input("\nSelect: ").strip()
     if choice == "1":
-        await do_dm(privkey)
+        await do_dm(privkey, blocked_set)
     elif choice == "2":
-        await do_dm_inbox(privkey, my_pubkey)
+        await do_dm_inbox(privkey, my_pubkey, blocked_set)
     elif choice == "0":
         return
     else:
@@ -322,7 +323,7 @@ async def do_search_user():
 
     elif choice == "2":
         q = input("Enter name to search: ").strip()
-        results = await search_profiles_by_name(q, since_days=365, per_relay_limit=800)
+        results = await search_profiles_by_name(q, per_relay_limit=800)
 
         if not results:
             print("No matches found (name search is relay-dependent).")
@@ -340,6 +341,65 @@ async def do_search_user():
 
 
 
+async def do_block(privkey, my_pubkey: str, blocked_set: set[str]):
+    print_header("BLOCK USER")
+
+    from .utils import normalize_pubkey_input
+    pk_in = input("Enter pubkey to block (64-hex or npub1...): ").strip()
+    try:
+        pk = normalize_pubkey_input(pk_in)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
+    if pk in blocked_set:
+        print("Already blocked.")
+        return
+
+    # add in-memory
+    blocked_set.add(pk)
+
+    # unfollow 
+    from .contacts import fetch_following_all_relays, apply_unfollow
+    from .events import build_signed_contacts_event
+    current = await fetch_following_all_relays(my_pubkey)
+    updated = apply_unfollow(current, pk)
+    eid_c, ev_c = build_signed_contacts_event(privkey, sorted(updated))
+    await publish_to_relays(eid_c, ev_c)
+
+
+    # publish updated mute list
+    from .mute_list import publish_mute_set
+    eid, ev = await publish_mute_set(privkey, blocked_set)
+    await publish_to_relays(eid, ev)
+    print(f"✅ Blocked. Total blocked: {len(blocked_set)}")
+
+
+async def do_unblock(privkey, blocked_set: set[str]):
+    print_header("UNBLOCK USER")
+
+    from .utils import normalize_pubkey_input
+    pk_in = input("Enter pubkey to unblock (64-hex or npub1...): ").strip()
+    try:
+        pk = normalize_pubkey_input(pk_in)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+
+    if pk not in blocked_set:
+        print("Not blocked.")
+        return
+
+    blocked_set.remove(pk)
+
+    from .mute_list import publish_mute_set
+    eid, ev = await publish_mute_set(privkey, blocked_set)
+    await publish_to_relays(eid, ev)
+    print(f"✅ Unblocked. Total blocked: {len(blocked_set)}")
+
+
+
+
 
 async def main():
     privkey = get_privkey_from_env()
@@ -347,6 +407,9 @@ async def main():
 
     # Initial connect-style section
     await show_status(my_pubkey)
+
+    blocked_set = await fetch_published_mute_set(my_pubkey)
+    print(f"\nBlocked (published mute list): {len(blocked_set)}")
 
     while True:
         print_header("MENU")
@@ -360,6 +423,8 @@ async def main():
         print("8) DM")
         print("9) Delete (by event id)")
         print("10) Search User")
+        print("11) Block user")
+        print("12) Unblock user")
         print("0) Exit")
 
         choice = input("\nSelect: ").strip()
@@ -379,11 +444,15 @@ async def main():
         elif choice == "7":
             await do_comment(privkey)
         elif choice == "8":
-            await do_dm_menu(privkey, my_pubkey)
+            await do_dm_menu(privkey, my_pubkey,blocked_set)
         elif choice == "9":
             await do_delete(privkey)   
         elif choice == "10":
             await do_search_user()
+        elif choice == "11":
+            await do_block(privkey, my_pubkey, blocked_set)
+        elif choice == "12":
+            await do_unblock(privkey, blocked_set)
         elif choice == "0":
             print("\n👋 Bye")
             return

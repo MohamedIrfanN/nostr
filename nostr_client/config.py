@@ -2,6 +2,8 @@ RELAYS = [
     "wss://relay.damus.io",
     "wss://relay.snort.social",
     "wss://nos.lol",
+    "wss://relay.nostr.band",
+    "wss://nostr.wine",
 ]
 
 PING_INTERVAL = 20

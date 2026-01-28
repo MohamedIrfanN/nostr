@@ -21,12 +21,12 @@ def chunk(lst, size):
 def format_time(ts: int | None) -> str:
     if not ts:
         return "unknown"
-    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime(
+    return datetime.fromtimestamp(int(ts)).strftime(
         "%Y-%m-%d %H:%M:%S UTC"
     )
 
 
-async def read_from_relay(relay: str, authors: list[str]):
+async def read_from_relay(relay: str, authors: list[str], blocked_set: set[str] | None = None):
     sub_id = str(uuid.uuid4())
     req = [
         "REQ",
@@ -66,6 +66,10 @@ async def read_from_relay(relay: str, authors: list[str]):
                 content = (event.get("content") or "").replace("\n", " ").strip()
                 author = (event.get("pubkey") or "")[:12]
 
+                if author in blocked_set:
+                    continue 
+                
+
                 print("\n🟦 EVENT")
                 print(f"  relay: {relay}")
                 print(f"  id:    {eid}")
@@ -80,7 +84,7 @@ async def read_from_relay(relay: str, authors: list[str]):
         print(f"   {type(e).__name__}: {e}")
 
 
-async def read_from_all_relays_following(authors: list[str]):
+async def read_from_all_relays_following(authors: list[str], blocked_set: set[str] | None = None):
     """
     Subscribe to kind:1 events from followed authors across all relays.
     Authors are chunked to avoid relay filter limits.
@@ -96,7 +100,7 @@ async def read_from_all_relays_following(authors: list[str]):
     for relay in RELAYS:
         for author_chunk in chunk(authors, AUTHOR_CHUNK_SIZE):
             tasks.append(
-                asyncio.create_task(read_from_relay(relay, author_chunk))
+                asyncio.create_task(read_from_relay(relay, author_chunk, blocked_set))
             )
 
     print("\n==============================")
