@@ -3,7 +3,12 @@ RELAYS = [
     "wss://relay.snort.social",
     "wss://nos.lol",
     "wss://relay.nostr.band",
+    "wss://relay.mostr.pub",
+    "wss://relay.nos.social",
     "wss://nostr.wine",
+    "wss://relay.primal.net",
+    "wss://nostr.land",
+
 ]
 
 PING_INTERVAL = 20

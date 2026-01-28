@@ -323,18 +323,30 @@ async def do_search_user():
 
     elif choice == "2":
         q = input("Enter name to search: ").strip()
-        results = await search_profiles_by_name(q, per_relay_limit=800)
+        results = await search_profiles_by_name(q)
 
         if not results:
             print("No matches found (name search is relay-dependent).")
             return
 
         print(f"\nMatches ({len(results)}):")
+        print("-" * 100)
+        print(f"{'#':<3} {'Name':<30} {'Pubkey'}")
+        print("-" * 100)
+
         for i, prof in enumerate(results[:20], 1):
-            name = prof.get("display_name") or prof.get("name") or ""
-            nip05 = prof.get("nip05") or ""
-            pk = prof.get("_pubkey", "")
-            print(f"{i}) {name}  {nip05}  {pk[:12]}…")
+            name = prof.get("name") or ""
+            display_name = prof.get("display_name") or ""
+            if display_name and name and display_name.lower() != name.lower():
+                name_str = f"{display_name} ({name})"
+            else:
+                name_str = display_name or name or "—"
+
+            pubkey = prof.get("_pubkey", "—")
+
+            print(f"{i:<3} {name_str:<30} {pubkey[:16] + '…'}")
+
+        print("-" * 100)
 
     else:
         print("⚠️ invalid option")

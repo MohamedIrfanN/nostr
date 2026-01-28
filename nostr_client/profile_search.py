@@ -63,27 +63,40 @@ async def fetch_profile_by_pubkey(pubkey_input: str, timeout_sec: float = 3.0) -
 
 async def search_profiles_by_name(
     name_query: str,
-    per_relay_limit: int = 150,   # was 400 (too slow for fallback)
+    limit: int = 10,
 ) -> list[dict]:
-    q = (name_query or "").strip().lower()
-    if not q:
+    raw_q = (name_query or "").strip()
+    if not raw_q:
         return []
 
-    found: dict[str, dict] = {}
+    # local compare uses lowercase
+    q = raw_q.lower()
 
-    RECV_TIMEOUT = 10
+    found: dict[str, dict] = {}
+    RECV_TIMEOUT = 3
+
+    def _matches(prof: dict) -> bool:
+        name = str(prof.get("name", "")).lower()
+        dname = str(prof.get("display_name", "")).lower()
+        nip05 = str(prof.get("nip05", "")).lower()
+        about = str(prof.get("about", "")).lower()
+        return (q in name) or (q in dname) or (q in nip05) or (q in about)
 
     async def _try_nip50(relay: str):
         sub_id = str(uuid.uuid4())
-        req = ["REQ", sub_id, {"kinds": [0], "search": q, "limit": 10}]
+        # IMPORTANT: send the original query (not lowercased) to the relay
+        req = ["REQ", sub_id, {"kinds": [0], "search": raw_q, "limit": 50}]
+
         try:
             async with websockets.connect(relay, ping_interval=20, ping_timeout=20) as ws:
                 await ws.send(json.dumps(req, separators=(",", ":")))
+
                 while True:
                     try:
                         raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
                     except asyncio.TimeoutError:
-                        break  # relay too slow / no EOSE
+                        break  # relay slow / no EOSE
+
                     msg = json.loads(raw)
 
                     if msg[0] == "EOSE":
@@ -97,43 +110,7 @@ async def search_profiles_by_name(
                         continue
 
                     prof = _parse_kind0_content(ev)
-                    prof["_pubkey"] = pk
-                    prof["_created_at"] = int(ev.get("created_at", 0))
-
-                    cur = found.get(pk)
-                    if cur is None or prof["_created_at"] > cur["_created_at"]:
-                        found[pk] = prof
-        except Exception:
-            return
-
-    async def _fallback_scan(relay: str):
-        sub_id = str(uuid.uuid4())
-        req = ["REQ", sub_id, {"kinds": [0], "limit": 10}]
-        try:
-            async with websockets.connect(relay, ping_interval=20, ping_timeout=20) as ws:
-                await ws.send(json.dumps(req, separators=(",", ":")))
-                while True:
-                    try:
-                        raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        break
-                    msg = json.loads(raw)
-
-                    if msg[0] == "EOSE":
-                        break
-                    if msg[0] != "EVENT":
-                        continue
-
-                    ev = msg[2]
-                    pk = ev.get("pubkey")
-                    if not pk:
-                        continue
-
-                    prof = _parse_kind0_content(ev)
-                    name = str(prof.get("name", "")).lower()
-                    dname = str(prof.get("display_name", "")).lower()
-                    nip05 = str(prof.get("nip05", "")).lower()
-                    if q not in name and q not in dname and q not in nip05:
+                    if not _matches(prof):
                         continue
 
                     prof["_pubkey"] = pk
@@ -142,17 +119,28 @@ async def search_profiles_by_name(
                     cur = found.get(pk)
                     if cur is None or prof["_created_at"] > cur["_created_at"]:
                         found[pk] = prof
+
         except Exception:
             return
 
-    # 1) Try NIP-50
     await asyncio.gather(*(_try_nip50(r) for r in RELAYS))
 
-    # # 2) Fallback scan only if nothing found
-    if not found:
-        await asyncio.gather(*(_fallback_scan(r) for r in RELAYS))
-
     out = list(found.values())
-    out.sort(key=lambda p: int(p.get("_created_at", 0)), reverse=True)
-    return out
+
+    # relevance like your friend (exact > startswith > contains)
+    def relevance_score(p: dict) -> int:
+        name = str(p.get("name", "")).lower()
+        dname = str(p.get("display_name", "")).lower()
+        nip05 = str(p.get("nip05", "")).lower()
+
+        if name == q or dname == q or nip05 == q:
+            return 0
+        if name.startswith(q) or dname.startswith(q) or nip05.startswith(q):
+            return 1
+        return 2
+
+    out.sort(key=lambda p: (relevance_score(p), -int(p.get("_created_at", 0))))
+    return out[:limit]
+
+
 
