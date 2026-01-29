@@ -412,6 +412,39 @@ async def do_unblock(privkey, blocked_set: set[str]):
 
 
 
+async def do_zap(privkey):
+    print_header("ZAP (NIP-57) → GENERATE INVOICE")
+    recipient = input("Enter recipient pubkey (64-hex or npub1...): ").strip()
+    amt = input("Enter amount (sats): ").strip()
+
+    # validate early (before doing network)
+    from .utils import normalize_pubkey_input
+    try:
+        _ = normalize_pubkey_input(recipient)
+    except Exception as e:
+        print(f"❌ Invalid pubkey: {e}")
+        return
+
+    if not amt.isdigit() or int(amt) <= 0:
+        print("❌ Amount must be a positive integer (sats)")
+        return
+
+    from .zap import generate_zap_invoice
+    try:
+        invoice, info = await generate_zap_invoice(privkey, recipient, int(amt))
+    except Exception as e:
+        print(f"❌ Zap invoice failed: {e}")
+        return
+
+    print("\n✅ Invoice generated")
+    print("recipient:", info["recipient_pubkey"])
+    print("lud16:    ", info.get("lud16") or "—")
+    print("amount:   ", f'{int(info["amount_msat"])//1000} sats')
+    print("\nBOLT11:")
+    print(invoice)
+
+
+
 
 async def main():
     privkey = get_privkey_from_env()
@@ -437,6 +470,7 @@ async def main():
         print("10) Search User")
         print("11) Block user")
         print("12) Unblock user")
+        print("13) Zap (invoice)")
         print("0) Exit")
 
         choice = input("\nSelect: ").strip()
@@ -465,6 +499,8 @@ async def main():
             await do_block(privkey, my_pubkey, blocked_set)
         elif choice == "12":
             await do_unblock(privkey, blocked_set)
+        elif choice == "13":
+            await do_zap(privkey)
         elif choice == "0":
             print("\n👋 Bye")
             return

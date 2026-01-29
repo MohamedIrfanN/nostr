@@ -307,3 +307,59 @@ def build_signed_mute_list(
     return event_id, event
 
 
+def build_signed_zap_request(
+    privkey: PrivateKey,
+    recipient_pubkey_hex: str,
+    amount_msat: int,
+    lnurl: str,
+    relays: list[str],
+    target_event_id: str | None = None,  # optional: zap a specific note
+) -> tuple[str, dict]:
+    """
+    NIP-57 zap request (kind:9734). This is what you pass to LNURL callback as `nostr=...`
+    Minimal tags:
+      - ["p", recipient_pubkey]
+      - ["amount", "<msats>"]
+      - ["relays", "<relay1>", "<relay2>", ...]
+      - ["lnurl", "<lnurl>"]
+      - optionally ["e", "<event_id>"] to zap a note
+    """
+    pubkey = pubkey_xonly_hex(privkey)
+    created_at = int(time.time())
+    kind = 9734
+
+    recipient_pubkey_hex = require_32byte_hex(recipient_pubkey_hex, "recipient pubkey")
+    if not isinstance(amount_msat, int) or amount_msat <= 0:
+        raise ValueError("amount_msat must be a positive integer")
+
+    lnurl = (lnurl or "").strip()
+    if not lnurl:
+        raise ValueError("lnurl is required")
+
+    tags: list[list[str]] = [
+        ["p", recipient_pubkey_hex],
+        ["amount", str(amount_msat)],
+        ["relays", *relays],
+        ["lnurl", lnurl],
+    ]
+
+    if target_event_id:
+        eid = require_32byte_hex(target_event_id, "event id")
+        tags.append(["e", eid])
+
+    content = ""  # typically empty for zap request
+    event_id = _event_id_from_fields(pubkey, created_at, kind, tags, content)
+    sig = _sign_event(privkey, event_id)
+
+    ev = {
+        "id": event_id,
+        "pubkey": pubkey,
+        "created_at": created_at,
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+        "sig": sig,
+    }
+    return event_id, ev
+
+
